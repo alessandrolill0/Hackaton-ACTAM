@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beat and Melody with Tone.js</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.46/Tone.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 50px;
+    }
+    button {
+      padding: 10px 20px;
+      font-size: 18px;
+      cursor: pointer;
+      margin: 10px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+    }
+    button.stop {
+      background-color: #f44336;
+    }
+    button:active {
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <h1>Beat and Melody with Tone.js</h1>
+  <button id="startStopButton">Start Beat & Melody</button>
+  <button id="stopButton" class="stop" disabled>Stop Beat & Melody</button>
+
+  <script>
+    // --- Beat Setup ---
+    const kick = new Tone.MembraneSynth().toDestination();
+    const snare = new Tone.NoiseSynth({ noise: { type: "white" }, envelope: { attack: 0.001, decay: 0.2, sustain: 0.1, release: 0.1 } }).toDestination();
+    const hiHat = new Tone.MetalSynth({ frequency: 400, envelope: { attack: 0.0001, decay: 0.1, release: 0.1 }, harmonicity: 5.1, modulationIndex: 32, resonance: 4000, octaves: 1.5 }).toDestination();
+
+    const kickPattern = new Tone.Loop((time) => kick.triggerAttackRelease("C1", "8n", time), "4n");
+    
+    const snarePattern = new Tone.Loop((time) => {
+      if (Tone.Transport.position.split(":")[1] === "1" || Tone.Transport.position.split(":")[1] === "3") {
+        snare.triggerAttackRelease("8n", time);
+      }
+    }, "4n");
+    const hiHatPattern = new Tone.Loop((time) => hiHat.triggerAttackRelease("8n", time), "8n");
+
+    
+    const noise = new Tone.NoiseSynth({
+      noise: { type: "white" },
+      envelope: { attack: 0.5, decay: 1, sustain: 1, release: 0.5 },
+    }).toDestination();
+    const filter = new Tone.Filter({
+      type: "lowpass",
+      frequency: 200,
+      rolloff: -24,
+      Q: 1,
+    }).toDestination();
+
+    
+
+ 
+    const reverb = new Tone.Reverb({
+      decay: 3, // Reverb tail length in seconds
+      preDelay: 0.01, // Pre-delay time in seconds
+      wet: 0.5, // Reverb mix (0 is dry, 1 is fully wet)
+    }).toDestination(); // Connect reverb to the master output
+
+    noise.connect(filter); // Noise goes into the filter
+    filter.connect(reverb); 
+
+    // Connect the noise to the reverb and filter
+    noise.connect(filter); // Noise goes into the filter
+    filter.connect(reverb); 
+
+    function stopBuildUp() {
+      noise.triggerRelease();
+      filter.frequency.cancelScheduledValues(); // Stop filter automation
+      noise.volume.cancelScheduledValues(); // Stop volume automation
+    }
+
+    // Function to start noise build-up
+    function startBuildUp() {
+      const now = Tone.now();
+      
+      // Reset filter frequency and volume
+      filter.frequency.setValueAtTime(200, now); // Start low
+      filter.frequency.linearRampToValueAtTime(10000, now + 16); // Sweep up over 16 seconds (8 bars)
+
+      noise.volume.setValueAtTime(-60, now); // Start quiet
+      noise.volume.linearRampToValueAtTime(-20, now + 10); // Increase volume over 8 bars
+
+      noise.triggerAttack();
+
+      // Schedule the noise to stop after 8 bars
+      Tone.Transport.schedule((time) => {
+        stopBuildUp();
+      }, "8m"); // "4m" is 8 measures in Tone.js (4m for 8 bars at 120 BPM)
+    }
+
+    
+    
+
+    // --- Melody Setup ---
+    const synth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sine" } }).toDestination();
+    const chords = [
+      { time: 0, notes: ['D4', 'Bb4'], duration: '2n' },
+      { time: 0.25, notes: ['D4', 'Bb4'], duration: '2n' },
+      { time: 0.5, notes: ['D4', 'A4'], duration: '2n' },
+      { time: 0.75, notes: ['D4', 'A4'], duration: '2n' },
+      { time: 1, notes: ['D4', 'G4'], duration: '2n' },
+      { time: 1.35, notes: ['D4', 'G4'], duration: '2n' },
+      { time: 1.65, notes: ['D4', 'G4'], duration: '32n' }
+    ];
+
+    const playChords = () => {
+      chords.forEach(chord => synth.triggerAttackRelease(chord.notes, chord.duration, Tone.now() + chord.time));
+    };
+
+    const melodyLoop = new Tone.Loop(() => playChords(), 2);
+
+    // --- Sections Logic ---
+    const startBridge = (time) => {
+      kickPattern.start(time);
+      startBuildUp();
+    };
+
+    const startMelodyAndSnare = (time) => {
+      snarePattern.start(time);
+    };
+
+    const stopKick = (time) => {
+      kickPattern.stop(time);
+    };
+
+    const stopSnare = (time) => {
+      snarePattern.stop(time);
+      hiHatPattern.stop(time);
+    };
+
+    const startFullBeat = (time) => {
+      melodyLoop.start(time);
+      hiHatPattern.start(time);
+    };
+
+
+
+    const stopAll = () => {
+      kickPattern.stop();
+      snarePattern.stop();
+      hiHatPattern.stop();
+      melodyLoop.stop();
+      stopBuildUp();
+      Tone.Transport.stop();
+    };
+
+    const scheduleSections = () => {
+      // Schedule the sections
+      const startTime = Tone.Transport.now();
+      Tone.Transport.schedule(startBridge, startTime); // Start with the bridge
+      Tone.Transport.schedule(startMelodyAndSnare, startTime + 8); // Add melody and snare after 8 seconds
+      Tone.Transport.schedule(startFullBeat, startTime + 16); //"" Add hi-hats after 16 seconds
+      Tone.Transport.schedule(stopSnare, startTime + 32);
+      Tone.Transport.schedule(stopKick, startTime + 48);
+      Tone.Transport.schedule(stopAll, startTime + 64);
+      Tone.Transport.start();
+    };
+
+    // --- Event Listeners ---
+    document.getElementById("startStopButton").addEventListener("click", async () => {
+      if (Tone.Transport.state !== "started") {
+        await Tone.start();
+        scheduleSections();
+        document.getElementById("startStopButton").textContent = "Stop";
+        document.getElementById("stopButton").disabled = false;
+      } else {
+        stopAll();
+        document.getElementById("startStopButton").textContent = "Start Beat & Melody";
+        document.getElementById("stopButton").disabled = true;
+      }
+    });
+
+    document.getElementById("stopButton").addEventListener("click", () => {
+      stopAll();
+      document.getElementById("startStopButton").textContent = "Start Beat & Melody";
+      document.getElementById("stopButton").disabled = true;
+    });
+  </script>
+</body>
+</html>
